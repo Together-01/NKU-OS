@@ -109,26 +109,19 @@ best_fit_alloc_pages(size_t n) {
     struct Page *page = NULL;
     list_entry_t *le = &free_list;
     size_t min_size = nr_free + 1;
-    /*LAB2 EXERCISE 2: 2311999*/ 
+    /*LAB2 EXERCISE 2: 2311999、2311991*/ 
     // 下面的代码是first-fit的部分代码，请修改下面的代码改为best-fit
     // 遍历空闲链表，查找满足需求的空闲页框
     // 如果找到满足需求的页面，记录该页面以及当前找到的最小连续空闲页框数量
-    struct Page *best_page = NULL;
-    list_entry_t *best_le = &free_list;
     while ((le = list_next(le)) != &free_list) {
         struct Page *p = le2page(le, page_link);
-        if (p->property >= n) {
-            // 寻找大小最接近n的空闲块
-            if (p->property < min_size) {
-                min_size = p->property;
-                best_page = p;
-                best_le = le;
+        if (p->property >= n && p->property < min_size) {
+            page = p;
+            min_size = p->property;
+            if(min_size == n) {
+                break; // 如果找到最优解，直接退出循环
             }
         }
-    }
-    if (best_page != NULL) {
-        page = best_page;
-        le = best_le;
     }
 
     if (page != NULL) {
