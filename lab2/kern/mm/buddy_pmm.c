@@ -119,11 +119,11 @@ buddy_alloc_pages(size_t n) {
     size_t node_size;
     size_t idx = 0;
     for(node_size = buddy_tree.size; node_size != npages; node_size /= 2 ) {
-    if (buddy_tree.longest[LEFT_CHILD(idx)] >= npages)
-      idx = LEFT_CHILD(idx);
-    else
-      idx = RIGHT_CHILD(idx);
-  }
+        if (buddy_tree.longest[LEFT_CHILD(idx)] >= npages)
+        idx = LEFT_CHILD(idx);
+        else
+        idx = RIGHT_CHILD(idx);
+    }
     buddy_tree.nr_free -= npages;
 
     // 定位页面并标记为已分配
