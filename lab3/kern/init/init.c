@@ -35,10 +35,17 @@ int kern_init(void) {
     clock_init();   // init clock interrupt
     intr_enable();  // enable irq interrupt
 
+    cprintf("非法指令异常测试:\n");
+    asm volatile(".word 0x00000000"); //触发非法指令异常
+
+    cprintf("断点异常测试:\n");
+    asm volatile("ebreak"); //触发断点异常
+
     /* do nothing */
     while (1)
         ;
 }
+
 
 void __attribute__((noinline))
 grade_backtrace2(int arg0, int arg1, int arg2, int arg3) {
