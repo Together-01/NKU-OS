@@ -88,7 +88,7 @@ alloc_proc(void)
     struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
     if (proc != NULL)
     {
-        // LAB4:EXERCISE1 YOUR CODE
+        // LAB4:EXERCISE1 2311999
         /*
          * below fields in proc_struct need to be initialized
          *       enum proc_state state;                      // Process state
@@ -104,7 +104,7 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
-                proc->state = PROC_UNINIT;
+        proc->state = PROC_UNINIT;
         proc->pid = -1;
         proc->runs = 0;
         proc->kstack = 0;
@@ -186,7 +186,7 @@ void proc_run(struct proc_struct *proc)
 {
     if (proc != current)
     {
-        // LAB4:EXERCISE3 YOUR CODE
+        // LAB4:EXERCISE3 2311991
         /*
          * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
          * MACROs or Functions:
@@ -195,7 +195,17 @@ void proc_run(struct proc_struct *proc)
          *   lsatp():                   Modify the value of satp register
          *   switch_to():              Context switching between two processes
          */
+        bool intr_flag;
+        struct proc_struct *prev = current, *next = proc;
+        local_intr_save(intr_flag);
+        {
+            current = proc;
 
+            lsatp(next->pgdir);
+
+            switch_to(&(prev->context), &(next->context));
+        }
+        local_intr_restore(intr_flag);
     }
 }
 
@@ -308,7 +318,7 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         goto fork_out;
     }
     ret = -E_NO_MEM;
-    // LAB4:EXERCISE2 YOUR CODE
+    // LAB4:EXERCISE2 2311999
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
      * MACROs or Functions:
