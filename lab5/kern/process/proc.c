@@ -105,6 +105,18 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
+        proc->state = PROC_UNINIT;
+        proc->pid = -1;
+        proc->runs = 0;
+        proc->kstack = 0;
+        proc->need_resched = 0;
+        proc->parent = NULL;
+        proc->mm = NULL;
+        memset(&(proc->context), 0, sizeof(struct context));
+        proc->tf = NULL;
+        proc->pgdir = boot_pgdir_pa;
+        proc->flags = 0;
+        memset(proc->name, 0, sizeof(proc->name));
 
         // LAB5 YOUR CODE : (update LAB4 steps)
         /*
@@ -112,6 +124,10 @@ alloc_proc(void)
          *       uint32_t wait_state;                        // waiting state
          *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
          */
+        proc->wait_state = 0;
+        proc->cptr = NULL;
+        proc->yptr = NULL;
+        proc->optr = NULL;
     }
     return proc;
 }
@@ -138,10 +154,10 @@ static void
 set_links(struct proc_struct *proc)
 {
     list_add(&proc_list, &(proc->list_link));
-    proc->yptr = NULL;
-    if ((proc->optr = proc->parent->cptr) != NULL)
+    proc->yptr = NULL;                             // 没有下一个兄弟
+    if ((proc->optr = proc->parent->cptr) != NULL) // 设置当前节点的上一个兄弟
     {
-        proc->optr->yptr = proc;
+        proc->optr->yptr = proc; // 最小的孩子变倒数第二小
     }
     proc->parent->cptr = proc;
     nr_process++;
@@ -225,6 +241,17 @@ void proc_run(struct proc_struct *proc)
          *   lsatp():                   Modify the value of satp register
          *   switch_to():              Context switching between two processes
          */
+        bool intr_flag;
+        struct proc_struct *prev = current, *next = proc;
+        local_intr_save(intr_flag);
+        {
+            current = proc;
+
+            lsatp(next->pgdir);
+
+            switch_to(&(prev->context), &(next->context));
+        }
+        local_intr_restore(intr_flag);
     }
 }
 
@@ -427,12 +454,38 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
      */
 
     //    1. call alloc_proc to allocate a proc_struct
+    if ((proc = alloc_proc()) == NULL)
+    {
+        goto fork_out;
+    }
+    proc->parent = current;
+    current->wait_state = 0;
+
     //    2. call setup_kstack to allocate a kernel stack for child process
+    if ((ret = setup_kstack(proc)) != 0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
+
     //    3. call copy_mm to dup OR share mm according clone_flag
+    if ((ret = copy_mm(clone_flags, proc)) != 0)
+    {
+        goto bad_fork_cleanup_kstack;
+    }
+
     //    4. call copy_thread to setup tf & context in proc_struct
+    copy_thread(proc, stack, tf);
+
     //    5. insert proc_struct into hash_list && proc_list
+    proc->pid = get_pid();
+    hash_proc(proc);
+    set_links(proc);
+
     //    6. call wakeup_proc to make the new child process RUNNABLE
+    wakeup_proc(proc);
+
     //    7. set ret vaule using child proc's pid
+    ret = proc->pid;
 
     // LAB5 YOUR CODE : (update LAB4 steps)
     // TIPS: you should modify your written code in lab4(step1 and step5), not add more code.
