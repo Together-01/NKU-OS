@@ -118,6 +118,7 @@ _restore_context:
     LOAD x2, 2*REGBYTES(sp)
     .endm
 
+    # 实验中 ebreak 到这里
     .globl __alltraps
 __alltraps:
     SAVE_ALL
@@ -126,6 +127,7 @@ __alltraps:
     jal trap
     # sp should be the same as before "jal trap"
 
+    # 返回
     .globl __trapret
 __trapret:
     RESTORE_ALL

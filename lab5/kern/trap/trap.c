@@ -137,6 +137,7 @@ void interrupt_handler(struct trapframe *tf)
         {
             sbi_shutdown();
         }
+        current->need_resched = 1;
         break;
     case IRQ_H_TIMER:
         cprintf("Hypervisor software interrupt\n");

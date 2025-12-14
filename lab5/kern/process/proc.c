@@ -730,6 +730,9 @@ load_icode(unsigned char *binary, size_t size)
      *          tf->status should be appropriate for user program (the value of sstatus)
      *          hint: check meaning of SPP, SPIE in SSTATUS, use them by SSTATUS_SPP, SSTATUS_SPIE(defined in risv.h)
      */
+    tf->gpr.sp = USTACKTOP;
+    tf->epc = elf->e_entry;
+    tf->status = (sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
 
     ret = 0;
 out:
@@ -896,13 +899,13 @@ kernel_execve(const char *name, unsigned char *binary, size_t size)
     int64_t ret = 0, len = strlen(name);
     //   ret = do_execve(name, len, binary, size);
     asm volatile(
-        "li a0, %1\n"
-        "lw a1, %2\n"
-        "lw a2, %3\n"
-        "lw a3, %4\n"
-        "lw a4, %5\n"
-        "li a7, 10\n"
-        "ebreak\n"
+        "li a0, %1\n" // SYS_exec 系统调用号
+        "lw a1, %2\n" // name
+        "lw a2, %3\n" // len
+        "lw a3, %4\n" // binary
+        "lw a4, %5\n" // size
+        "li a7, 10\n" // 用于表示这不是一个普通的断点中断
+        "ebreak\n"    // 触发异常
         "sw a0, %0\n"
         : "=m"(ret)
         : "i"(SYS_exec), "m"(name), "m"(len), "m"(binary), "m"(size)
