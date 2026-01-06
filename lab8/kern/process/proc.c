@@ -126,10 +126,10 @@ alloc_proc(void)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
 
-        //LAB8 YOUR CODE : (update LAB6 steps)
+        // LAB8 2311999 : (update LAB6 steps)
         /*
          * below fields(add in LAB6) in proc_struct need to be initialized
-         *       struct files_struct * filesp;                file struct point        
+         *       struct files_struct * filesp;                file struct point
          */
         proc->state = PROC_UNINIT;
         proc->pid = -1;
@@ -152,8 +152,7 @@ alloc_proc(void)
         proc->lab6_run_pool.left = proc->lab6_run_pool.right = proc->lab6_run_pool.parent = NULL;
         proc->lab6_stride = 0;
         proc->lab6_priority = 0;
-
-        
+        proc->filesp = NULL;
     }
     return proc;
 }
@@ -257,22 +256,34 @@ get_pid(void)
 void proc_run(struct proc_struct *proc)
 {
     // LAB4:填写你在lab4中实现的代码
-        /*
-        * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
-        * MACROs or Functions:
-        *   local_intr_save():        Disable interrupts
-        *   local_intr_restore():     Enable Interrupts
-        *   lcr3():                   Modify the value of CR3 register
-        *   switch_to():              Context switching between two processes
-        */
-    //LAB8 YOUR CODE : (update LAB4 steps)
-      /*
-       * below fields(add in LAB6) in proc_struct need to be initialized
-       *       before switch_to();you should flush the tlb
-       *        MACROs or Functions:
-       *       flush_tlb():          flush the tlb        
-       */
-    
+    /*
+     * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
+     * MACROs or Functions:
+     *   local_intr_save():        Disable interrupts
+     *   local_intr_restore():     Enable Interrupts
+     *   lcr3():                   Modify the value of CR3 register
+     *   switch_to():              Context switching between two processes
+     */
+    // LAB8 2311999 : (update LAB4 steps)
+    /*
+     * below fields(add in LAB6) in proc_struct need to be initialized
+     *       before switch_to();you should flush the tlb
+     *        MACROs or Functions:
+     *       flush_tlb():          flush the tlb
+     */
+    bool intr_flag;
+    struct proc_struct *prev = current, *next = proc;
+    local_intr_save(intr_flag);
+    {
+        current = proc;
+
+        lsatp(next->pgdir);
+
+        flush_tlb();
+
+        switch_to(&(prev->context), &(next->context));
+    }
+    local_intr_restore(intr_flag);
 }
 
 // forkret -- the first kernel entry point of a new thread/process
@@ -522,14 +533,34 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
      *   proc_list:    the process set's list
      *   nr_process:   the number of process set
      */
-
     //    1. call alloc_proc to allocate a proc_struct
+    if ((proc = alloc_proc()) == NULL)
+    {
+        goto fork_out;
+    }
+    proc->parent = current;
+    current->wait_state = 0;
     //    2. call setup_kstack to allocate a kernel stack for child process
+    if ((ret = setup_kstack(proc)) != 0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
     //    3. call copy_mm to dup OR share mm according clone_flag
+    if ((ret = copy_mm(clone_flags, proc)) != 0)
+    {
+        goto bad_fork_cleanup_kstack;
+    }
     //    4. call copy_thread to setup tf & context in proc_struct
+    copy_thread(proc, stack, tf);
     //    5. insert proc_struct into hash_list && proc_list
+    proc->pid = get_pid();
+    list_add(&proc_list, &(proc->list_link));
+    hash_proc(proc);
     //    6. call wakeup_proc to make the new child process RUNNABLE
+    nr_process++;
+    wakeup_proc(proc);
     //    7. set ret vaule using child proc's pid
+    ret = proc->pid;
 
     // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)
     /* Some Functions
@@ -538,12 +569,12 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
      *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
      *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
      */
-    
+
     if (copy_files(clone_flags, proc) != 0)
     { // for LAB8
         goto bad_fork_cleanup_kstack;
     }
-    
+
 fork_out:
     return ret;
 
@@ -650,7 +681,7 @@ load_icode(int fd, int argc, char **kargv)
      *  pgdir_alloc_page - allocate new memory for  TEXT/DATA/BSS/stack parts
      *  lsatp             - update Page Directory Addr Register -- CR3
      */
-    //You can Follow the code form LAB5 which you have completed  to complete 
+    // You can Follow the code form LAB5 which you have completed  to complete
     /* (1) create a new mm for current process
      * (2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
      * (3) copy TEXT/DATA/BSS parts in binary to memory space of process
@@ -666,7 +697,6 @@ load_icode(int fd, int argc, char **kargv)
      * (7) setup trapframe for user environment
      * (8) if up steps failed, you should cleanup the env.
      */
-    
 }
 
 // this function isn't very correct in LAB8

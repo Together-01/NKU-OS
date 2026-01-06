@@ -541,7 +541,7 @@ sfs_close(struct inode *node) {
 }
 
 /*  
- * sfs_io_nolock - Rd/Wr a file contentfrom offset position to offset+ length  disk blocks<-->buffer (in memroy)
+ * sfs_io_nolock - Rd/Wr a file content from offset position to offset + length  disk blocks<-->buffer (in memroy)
  * @sfs:      sfs file system
  * @sin:      sfs inode in memory
  * @buf:      the buffer Rd/Wr
@@ -553,8 +553,11 @@ static int
 sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset, size_t *alenp, bool write) {
     struct sfs_disk_inode *din = sin->din;
     assert(din->type != SFS_TYPE_DIR);
+
+    off_t startpos = offset;
     off_t endpos = offset + *alenp, blkoff;
     *alenp = 0;
+
 	// calculate the Rd/Wr end position
     if (offset < 0 || offset >= SFS_MAX_FILE_SIZE || offset > endpos) {
         return -E_INVAL;
@@ -589,7 +592,7 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
     uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
 
-  //LAB8:EXERCISE1 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
+  //LAB8:2311999 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
 	/*
 	 * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
@@ -600,12 +603,84 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
 	*/
 
-    
+    uint8_t *ptr = (uint8_t *)buf;
+    off_t pos = startpos;
+
+    // (1) If offset isn't aligned with the first block
+    blkoff = pos % SFS_BLKSIZE;
+    if (blkoff != 0) {
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - pos);
+        assert(size != 0);
+
+        if (write) {
+            while (din->blocks < blkno) {
+                if ((ret = sfs_bmap_load_nolock(sfs, sin, din->blocks, NULL)) != 0) {
+                    goto out;
+                }
+            }
+        }
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if ((ret = sfs_buf_op(sfs, ptr, size, ino, blkoff)) != 0) {
+            goto out;
+        }
+        alen += size;
+        ptr += size;
+        pos += size;
+
+        blkno++;
+        nblks = endpos / SFS_BLKSIZE - blkno;
+    }
+
+    // (2) Rd/Wr aligned blocks (one block per op; file blocks may be non-contiguous on disk)
+    while (nblks != 0) {
+        if (write) {
+            while (din->blocks < blkno) {
+                if ((ret = sfs_bmap_load_nolock(sfs, sin, din->blocks, NULL)) != 0) {
+                    goto out;
+                }
+            }
+        }
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if ((ret = sfs_block_op(sfs, ptr, ino, 1)) != 0) {
+            goto out;
+        }
+        alen += SFS_BLKSIZE;
+        ptr += SFS_BLKSIZE;
+        pos += SFS_BLKSIZE;
+        blkno++;
+        nblks--;
+    }
+
+    // (3) If end position isn't aligned with the last block
+    if (pos < endpos) {
+        size = endpos - pos;
+        assert(size > 0 && size < SFS_BLKSIZE);
+
+        if (write) {
+            while (din->blocks < blkno) {
+                if ((ret = sfs_bmap_load_nolock(sfs, sin, din->blocks, NULL)) != 0) {
+                    goto out;
+                }
+            }
+        }
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if ((ret = sfs_buf_op(sfs, ptr, size, ino, 0)) != 0) {
+            goto out;
+        }
+        alen += size;
+        pos += size;
+    }
 
 out:
     *alenp = alen;
-    if (offset + alen > sin->din->size) {
-        sin->din->size = offset + alen;
+    if (write && startpos + alen > sin->din->size) {
+        sin->din->size = startpos + alen;
         sin->dirty = 1;
     }
     return ret;
