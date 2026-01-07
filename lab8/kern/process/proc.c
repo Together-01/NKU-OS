@@ -673,8 +673,6 @@ load_icode_read(int fd, void *buf, size_t len, off_t offset)
 static int
 load_icode(int fd, int argc, char **kargv)
 {
-    cprintf("load_icode: reading entire file into memory\n");
-
     if (current->mm != NULL)
     {
         panic("load_icode: current->mm must be empty.\n");
@@ -684,16 +682,12 @@ load_icode(int fd, int argc, char **kargv)
     struct stat stat_buf;
     if (sysfile_fstat(fd, &stat_buf) != 0)
     {
-        cprintf("load_icode: fstat failed\n");
         sysfile_close(fd);
         return -E_INVAL;
     }
 
-    cprintf("load_icode: file size = %ld bytes\n", stat_buf.st_size);
-
     if (stat_buf.st_size <= 0)
     {
-        cprintf("load_icode: file empty\n");
         sysfile_close(fd);
         return -E_INVAL;
     }
@@ -703,18 +697,13 @@ load_icode(int fd, int argc, char **kargv)
     unsigned char *binary = kmalloc(file_size);
     if (binary == NULL)
     {
-        cprintf("load_icode: kmalloc failed for file buffer\n");
         sysfile_close(fd);
         return -E_NO_MEM;
     }
 
-    // 读取整个文件
-    cprintf("load_icode: reading entire file...\n");
-
     // 重置到文件开始
     if (sysfile_seek(fd, 0, LSEEK_SET) != 0)
     {
-        cprintf("load_icode: seek to 0 failed\n");
         kfree(binary);
         sysfile_close(fd);
         return -E_INVAL;
@@ -726,15 +715,12 @@ load_icode(int fd, int argc, char **kargv)
         int n = sysfile_read(fd, binary + total_read, file_size - total_read);
         if (n <= 0)
         {
-            cprintf("load_icode: read failed at offset %zu, got %d\n", total_read, n);
             kfree(binary);
             sysfile_close(fd);
             return -E_INVAL;
         }
         total_read += n;
     }
-
-    cprintf("load_icode: successfully read %zu bytes\n", total_read);
 
     // 关闭文件
     sysfile_close(fd);
@@ -746,7 +732,6 @@ load_icode(int fd, int argc, char **kargv)
     // (1) create a new mm for current process
     if ((mm = mm_create()) == NULL)
     {
-        cprintf("load_icode: mm_create failed\n");
         kfree(binary);
         goto bad_mm;
     }
@@ -754,7 +739,6 @@ load_icode(int fd, int argc, char **kargv)
     // (2) create a new PDT, and mm->pgdir = kernel virtual addr of PDT
     if (setup_pgdir(mm) != 0)
     {
-        cprintf("load_icode: setup_pgdir failed\n");
         kfree(binary);
         goto bad_pgdir_cleanup_mm;
     }
@@ -771,23 +755,17 @@ load_icode(int fd, int argc, char **kargv)
     // (3.3) This program is valid?
     if (elf->e_magic != ELF_MAGIC)
     {
-        cprintf("load_icode: invalid ELF magic: %x\n", elf->e_magic);
         ret = -E_INVAL_ELF;
         kfree(binary);
         goto bad_elf_cleanup_pgdir;
     }
 
-    cprintf("load_icode: ELF valid, entry=%lx, phnum=%d\n", elf->e_entry, elf->e_phnum);
-
     uint32_t vm_flags, perm;
     struct proghdr *ph_end = ph + elf->e_phnum;
 
-    cprintf("load_icode: processing %d program headers\n", elf->e_phnum);
     for (int i = 0; i < elf->e_phnum; i++)
     {
         struct proghdr *p = &ph[i];
-        cprintf("  Segment %d: type=%d, flags=%x, va=%lx, filesz=%lx, memsz=%lx, offset=%lx\n",
-                i, p->p_type, p->p_flags, p->p_va, p->p_filesz, p->p_memsz, p->p_offset);
     }
     // (3.4) find every program section headers
     for (; ph < ph_end; ph++)
@@ -798,14 +776,9 @@ load_icode(int fd, int argc, char **kargv)
         }
         if (ph->p_filesz > ph->p_memsz)
         {
-            cprintf("load_icode: filesz > memsz\n");
             ret = -E_INVAL_ELF;
             kfree(binary);
             goto bad_cleanup_mmap;
-        }
-        if (ph->p_filesz == 0)
-        {
-            continue;
         }
 
         // (3.5) call mm_map to setup the new vma
@@ -825,12 +798,8 @@ load_icode(int fd, int argc, char **kargv)
         if (vm_flags & VM_EXEC)
             perm |= PTE_X;
 
-        cprintf("load_icode: mapping segment: va=%lx, size=%lx, flags=%x\n",
-                ph->p_va, ph->p_memsz, vm_flags);
-
         if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0)
         {
-            cprintf("load_icode: mm_map failed: %d\n", ret);
             kfree(binary);
             goto bad_cleanup_mmap;
         }
@@ -862,7 +831,6 @@ load_icode(int fd, int argc, char **kargv)
         {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL)
             {
-                cprintf("load_icode: pgdir_alloc_page failed at la=%lx\n", la);
                 kfree(binary);
                 goto bad_cleanup_mmap;
             }
@@ -876,8 +844,7 @@ load_icode(int fd, int argc, char **kargv)
             memcpy(page2kva(page) + off, from, size);
             start += size, from += size;
         }
-        cprintf("load_icode: Processing BSS segment: start=%lx, end=%lx, la=%lx\n",
-                start, end, la);
+
         // (3.6.2) build BSS section of binary program
         end = ph->p_va + ph->p_memsz;
         if (start < la)
@@ -909,7 +876,6 @@ load_icode(int fd, int argc, char **kargv)
         {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL)
             {
-                cprintf("load_icode: pgdir_alloc_page for BSS failed at la=%lx\n", la);
                 kfree(binary);
                 goto bad_cleanup_mmap;
             }
@@ -927,7 +893,6 @@ load_icode(int fd, int argc, char **kargv)
     kfree(binary);
 
     // (4) build user stack memory
-    cprintf("load_icode: building user stack\n");
     vm_flags = VM_READ | VM_WRITE | VM_STACK;
 
 // 确保栈大小足够（通常至少 1-2 个页面）
@@ -935,7 +900,6 @@ load_icode(int fd, int argc, char **kargv)
 
     if ((ret = mm_map(mm, USTACKTOP - USER_STACK_SIZE, USER_STACK_SIZE, vm_flags, NULL)) != 0)
     {
-        cprintf("load_icode: mm_map for stack failed: %d\n", ret);
         goto bad_cleanup_mmap;
     }
 
@@ -944,7 +908,6 @@ load_icode(int fd, int argc, char **kargv)
     {
         if (pgdir_alloc_page(mm->pgdir, addr, PTE_R | PTE_W | PTE_U | PTE_V) == NULL)
         {
-            cprintf("load_icode: pgdir_alloc_page for stack failed at %lx\n", addr);
             ret = -E_NO_MEM;
             goto bad_cleanup_mmap;
         }
@@ -969,8 +932,24 @@ load_icode(int fd, int argc, char **kargv)
     // 确保正确的状态标志
     tf->status = (sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
 
-    cprintf("load_icode: successfully loaded program, entry=%lx, sp=%lx\n",
-            elf->e_entry, tf->gpr.sp);
+    // 保证新进程的stdin/stdout都指向console，防止shell输入page fault
+    // 强制stdin分配到fd=0，stdout分配到fd=1
+    if (!file_testfd(0, 1, 0)) {
+        int ret = file_open("stdin", O_RDONLY);
+        if (ret != 0) {
+            // file_open返回的fd不是0，强制dup到0
+            file_dup(ret, 0);
+            file_close(ret);
+        }
+    }
+    if (!file_testfd(1, 0, 1)) {
+        int ret = file_open("stdout", O_WRONLY);
+        if (ret != 1) {
+            file_dup(ret, 1);
+            file_close(ret);
+        }
+    }
+
     ret = 0;
     goto out;
 
@@ -1263,35 +1242,19 @@ init_main(void *arg)
         panic("set boot fs failed: %e.\n", ret);
     }
 
-    cprintf("init_main: bootfs set, creating user_main\n");
-
     int pid = kernel_thread(user_main, NULL, 0);
     if (pid <= 0)
     {
         panic("create user_main failed.\n");
     }
 
-    cprintf("init_main: user_main created with pid=%d\n", pid);
-
-    cprintf("init_main: waiting for child processes\n");
     while (do_wait(0, NULL) == 0)
     {
-        cprintf("init_main: child exited, schedule\n");
         schedule();
     }
 
-    cprintf("init_main: do_wait returned non-zero, no more children\n");
-
     fs_cleanup();
-
-    cprintf("all user-mode processes have quit.\n");
-    cprintf("nr_process=%d\n", nr_process);
-
-    // 临时注释掉断言
-    // assert(nr_process == 2);
-
-    cprintf("init check memory pass.\n");
-
+    
     // init_main不应该退出
     while (1)
     {
