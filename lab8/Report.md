@@ -18,7 +18,52 @@ sfs_io_nolock()函数的主要作用是在不加锁的情况下，根据 offset 
 ## 练习2: 完成基于文件系统的执行程序机制的实现
 **改写proc.c中的load_icode函数和其他相关函数，实现基于文件系统的执行程序机制。执行：make qemu。如果能看看到sh用户程序的执行界面，则基本成功了。如果在sh用户界面上可以执行exit, hello（更多用户程序放在user目录下）等其他放置在sfs文件系统中的其他执行程序，则可以认为本实验基本成功。**
 
+本次实验我们在 `kern/process/proc.c` 中实现并完善了基于文件系统的程序装载机制（核心函数：`load_icode`），并补充了若干配套函数的处理逻辑，保证从 SFS 文件系统打开的可执行文件能正确装入用户进程地址空间并运行。
 
+
+关键文件与函数
+- `kern/process/proc.c`：实现了 `load_icode`、`load_icode_read`、`do_execve` 的调用逻辑以及与 mm/pgdir、文件描述符的衔接。
+- `kern/fs` 与 `kern/sysfile`：提供基于 SFS 的文件打开/读/seek/close 接口（`sysfile_open`/`sysfile_read`/`sysfile_seek`/`sysfile_close` 等），`load_icode` 使用这些接口从文件系统读取 ELF 文件内容。
+
+实现流程
+1. 验证并读取文件大小
+    - 使用 `sysfile_fstat(fd, &stat_buf)` 获得待执行文件的大小，校验合法性（文件大小 > 0）。
+
+2. 将整个文件读入内核缓冲区
+    - 为简化实现，先分配一段内核内存 `binary = kmalloc(file_size)`，并通过 `sysfile_seek` + `sysfile_read` 循环读取完整文件到该缓冲区，然后关闭文件描述符 `sysfile_close(fd)`。
+    - 任何读取或内存分配失败都会做清理并返回错误码。
+
+3. 解析 ELF 头并逐段装载（基于项目中已有的 ELF 格式结构体）
+    - 检查 ELF 魔数 `elf->e_magic`，若非法返回 `-E_INVAL_ELF`。
+    - 遍历 program headers (`proghdr`)，对每个类型为 `ELF_PT_LOAD` 的段：
+      - 计算用户态虚拟地址范围（若段中的虚拟地址落在内核地址空间，则将其映射到用户等效地址，例如偏移到 `UTEXT`）。
+      - 调用 `mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)` 创建对应的 VMA（虚拟内存区域），并根据访问权限设置 PTE 权限位（R/W/X/U 等）。
+      - 按页循环调用 `pgdir_alloc_page(mm->pgdir, va, perm)` 分配物理页并建立页表映射，然后把 ELF 中的文件内容 memcpy 到相应页的对应偏移位置，文件部分外的 BSS 区域用 0 填充。
+      - 对跨页或段尾部未对齐的处理做了细致的 off/size 计算，避免越界和未初始化内存。
+
+4. 构建用户栈
+    - 调用 `mm_map` 为用户栈分配 VMA（示例实现分配了一个 4 页的栈区域），并逐页通过 `pgdir_alloc_page` 分配实际页面。
+    - 将 trapframe 中的用户栈指针设置为栈顶 `USTACKTOP`（RISC-V: 高地址向低地址增长）。
+
+5. 切换并激活新地址空间
+    - 在完成段装载与栈准备后，增加 mm 的引用计数 `mm_count_inc(mm)`，并把 `current->mm`、`current->pgdir` 设置为新创建的 mm/pgdir，调用 `lsatp(current->pgdir)` 刷新当前页表映射，确保随后上下文进入用户态时使用新地址空间。
+
+6. 设置 trapframe（用户态入口点与寄存器）
+    - 设置 `tf->epc = elf->e_entry`（程序入口），`tf->gpr.sp = USTACKTOP`，并设置 `tf->status` 保留内核的 sstatus 的用户位与 SPIE 等位用于返回用户态。
+
+7. 处理标准输入/输出（避免新用户进程没有 fd 导致的 page-fault）
+    - 确保 `fd=0`/`fd=1` 已经指向 console：若当前文件表中没有对应 fd，使用 `file_open("stdin", O_RDONLY)` / `file_dup` 将 console 分配到标准输入/输出。
+
+8. 错误处理与资源回收
+    - 在任一步骤出错（内存、读文件、ELF 验证或页分配失败），都会按照执行路径释放已分配资源：释放 binary 缓冲、`exit_mmap(mm)`、`put_pgdir(mm)`、`mm_destroy(mm)` 等，确保不会泄露内存或留下不一致的 mm。
+
+9. 参数传递（argv）
+    - 把用户态的 `argv` 先拷贝为内核空间字符串（函数 `copy_kargv`），并在 exec 成功或失败后释放这些内核缓冲（`put_kargv`）。
+
+
+**`make grade`结果**
+
+![make grade result](fig/result_of_makegrade.png)
 
 ## 扩展练习 Challenge1：完成基于“UNIX的PIPE机制”的设计方案
 **如果要在ucore里加入UNIX的管道（Pipe）机制，至少需要定义哪些数据结构和接口？（接口给出语义即可，不必具体实现。数据结构的设计应当给出一个（或多个）具体的C语言struct定义。在网络上查找相关的Linux资料和实现，请在实验报告中给出设计实现”UNIX的PIPE机制“的概要设方案，你的设计应当体现出对可能出现的同步互斥问题的处理。）**
